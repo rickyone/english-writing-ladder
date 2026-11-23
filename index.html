@@ -101,6 +101,14 @@
   .line-review{list-style:none; padding:0; margin:10px 0 0}
   .line-review li{font-size:15px; padding:7px 10px; border-radius:10px; margin-bottom:5px; background:#f0faf3; border-left:4px solid #8fd6a8}
   .line-review li.tip{background:#fff7e8; border-left-color:#f0c674}
+  .line-review li.up{background:#eef4ff; border-left-color:#7fa8e8}
+  .lv-chip{display:inline-block; font-size:11px; font-weight:700; padding:1px 7px; border-radius:999px; margin-left:6px; vertical-align:middle; background:#eef4ff; color:#3a6fc4}
+  .lv-chip.l2{background:#efe9ff; color:#8055c0}
+  .lv-chip.l3{background:#eaf9ef; color:#1d7a42}
+  .lv-chip.l4{background:#fff2e0; color:#b9770a}
+  .sent-level{background:#f7f4ff; border:2px solid #e0d6ff; border-radius:12px; padding:10px 12px; margin-top:12px; font-size:14px; color:#5a4a7a}
+  .sent-level b{color:#8055c0}
+  .sent-level .ladder{margin-top:6px; font-size:13px; color:#6f6f80; line-height:1.8}
   .confetti{position:fixed; top:-20px; width:10px; height:16px; z-index:9999; pointer-events:none; animation:fall 2.2s ease-in forwards}
   @keyframes fall{to{transform:translateY(105vh) rotate(720deg); opacity:0}}
   .reveal{animation:reveal .5s ease both}
@@ -329,6 +337,12 @@
   .rv-btns{margin-top:8px; display:flex; gap:8px; flex-wrap:wrap}
   .rv-ok{background:#37b26b; color:#fff; border:none; border-radius:10px; padding:7px 14px; font-size:14px; cursor:pointer}
   .rv-no{background:#fff; color:#c0392b; border:2px solid #f0b8b8; border-radius:10px; padding:7px 14px; font-size:14px; cursor:pointer}
+  .rv-grade{background:#fff; border:2px solid var(--line); border-radius:10px; padding:8px 11px; min-height:40px; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit}
+  .rv-grade.g0{color:#c0392b; border-color:#f0b8b8}
+  .rv-grade.g1{color:#b9770a; border-color:#f0d6a8}
+  .rv-grade.g2{color:#1d7a42; border-color:#8fd6a8}
+  .rv-grade.g3{color:#3a6fc4; border-color:#b9dcff}
+  .rv-grade:hover{border-color:var(--accent)}
   .rv-empty{text-align:center; color:#6f6f80; padding:20px; font-size:15px}
 
   .cb-item{background:#fffdf7; border:2px solid var(--line); border-radius:14px; padding:12px 14px; margin-bottom:10px}
@@ -466,7 +480,7 @@
   <div class="tpl-card" id="reviewCard">
     <div class="grow-head"><b>句型温故 · 练到自动化</b><button id="reviewBtn2">收起</button></div>
     <div class="ai-note">
-      💡 记牢的秘诀不是一天重复 100 次，而是<b>在快忘记时复习</b>：1天→2天→4天→7天→15天。今天该复习的句子在下面，<b>先自己写出来再看答案</b>（主动回忆才记得牢）。写对了间隔就拉长，写错了明天重来。
+      💡 记牢的秘诀不是一天重复 100 次，而是<b>在快忘记时复习</b>。每一项会按你的记忆情况<b>自己算下次复习时间</b>：觉得越轻松，间隔拉得越长；忘了就缩短、明天再见。今天该复习的在下面，<b>先自己写出来再看答案</b>（主动回忆才记得牢）。
     </div>
     <div id="reviewBody"></div>
   </div>
@@ -1245,17 +1259,32 @@ function load(){
   // 旧数据迁移：裸 topicId -> P:topicId（句型项）
   const oldKeys=Object.keys(state.review).filter(k=>k.indexOf(":")<0);
   oldKeys.forEach(k=>{ state.review["P:"+k]=state.review[k]; delete state.review[k]; });
+  // 旧莱特纳盒子 -> FSRS 字段（box/hits -> s/d/reps/lapses/streak）
+  Object.keys(state.review).forEach(k=>{
+    const r=state.review[k];
+    if(typeof r.s==="number") return;
+    const oldBox=typeof r.box==="number"?r.box:0;
+    r.s=[1,2,4,8,15][Math.min(4,oldBox)];
+    r.d=5-oldBox*0.5;
+    r.reps=r.hits||0;
+    r.lapses=r.miss||0;
+    r.streak=(r.streak2!==undefined?r.streak2:(oldBox>=3?2:0));
+    r.interval=r.s;
+    delete r.box; delete r.hits;
+  });
 }
 
-/* ---------- 间隔重复（莱特纳盒子）：把句型/模板练到自动化 ---------- */
-const BOX_DAYS=[1,2,4,7,15]; // 每级盒子的复习间隔（天）
-const MASTER_BOX=3;          // 到这个盒子且连续答对2次 = 已掌握
+/* ---------- 间隔重复（FSRS 简化版）：按每项的记忆稳定性自适应安排复习 ---------- */
+/* 借鉴 agent-tutor-skill 的 FSRS 思路：每个句型/模板单独记稳定性 S（天数），
+   答得越轻松间隔越长、答错则大幅缩短；比固定 1/2/4/7/15 天更贴合个人记忆。 */
+const MASTER_REPS=3;         // 连续答对3次且稳定性≥10天 = 已自动化掌握
+const FSRS={ INIT_S:1, MAX_S:60, RETENTION:0.9 };
 function pKey(topicId){ return "P:"+topicId; }
 function tKey(topicId){ return "T:"+topicId; }
 function addToReview(topicId, kind){
   const key=(kind==="tpl"?tKey:pKey)(topicId);
   if(state.review[key]) return;
-  state.review[key]={box:0, due:addDays(todayKey(),BOX_DAYS[0]), streak:0, hits:0, learned:todayKey()};
+  state.review[key]={s:FSRS.INIT_S, d:5, reps:0, lapses:0, streak:0, due:addDays(todayKey(),1), learned:todayKey()};
   save();
 }
 function addDays(key,n){
@@ -1263,19 +1292,34 @@ function addDays(key,n){
   const d=new Date(p[0],p[1]-1,p[2]); d.setDate(d.getDate()+n);
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 }
+function daysBetween(a,b){
+  const pa=a.split('-').map(Number), pb=b.split('-').map(Number);
+  return Math.round((new Date(pb[0],pb[1]-1,pb[2])-new Date(pa[0],pa[1]-1,pa[2]))/86400000);
+}
 function dueReviewKeys(){ return Object.keys(state.review).filter(k=>state.review[k].due<=todayKey()); }
 function masteredCount(){ return Object.keys(state.review).filter(k=>isMastered(k)).length; }
-function isMastered(key){ const r=state.review[key]; return r && r.box>=MASTER_BOX && r.streak>=2; }
-function reviewAnswer(key, ok){
+function isMastered(key){ const r=state.review[key]; return r && r.streak>=MASTER_REPS && r.s>=10; }
+/* grade: 0=忘了(again) 1=吃力(hard) 2=顺利(good) 3=太简单(easy) */
+function reviewAnswer(key, grade){
   const r=state.review[key];
   if(!r) return;
-  if(ok){
-    r.streak++; r.hits++;
-    r.box=Math.min(BOX_DAYS.length-1, r.box+1);
+  const elapsed=Math.max(1, daysBetween(r.learned||todayKey(), todayKey()));
+  if(grade===0){
+    r.lapses++; r.streak=0;
+    r.s=Math.max(1, r.s*0.35);        // 忘了：稳定性大幅回退，但不归零
+    r.d=Math.min(10, r.d+1.5);        // 难度上升
   } else {
-    r.streak=0; r.box=0;
+    const mod = grade===1?0.6 : grade===2?1.0 : 1.5;  // hard/good/easy 的增长系数
+    r.streak++;
+    r.s=Math.min(FSRS.MAX_S, Math.max(r.s*mod, r.s+ (grade===3?3:1)));
+    r.d=Math.max(1, r.d - (grade===3?0.8:0.2));
   }
-  r.due=addDays(todayKey(), BOX_DAYS[r.box]);
+  // 目标保留率 0.9：间隔 ≈ S × ln(1/R)。这里 S 已按间隔量级，直接用 S 作间隔天数。
+  let interval=Math.max(1, Math.round(r.s));
+  if(grade===1) interval=Math.max(1, Math.round(interval*0.8)); // hard 稍微提前
+  if(grade===3) interval=Math.round(interval*1.2);              // easy 稍微推后
+  r.interval=interval;
+  r.due=addDays(todayKey(), interval);
   save();
 }
 function diffOf(stage, tid){ return ts(tid).diff[stage]||0; }
@@ -2128,29 +2172,49 @@ function renderWorks(){
 }
 
 /* ---------- 按句点评 ---------- */
+/* 句式层级识别：简单句→并列句→复合句→定语从句（借鉴「英语写作进化教练」） */
+function sentenceLevel(t){
+  if(/\b(who|which|that)\b/i.test(t) && /\b(the|a|an|my|his|her)\b/i.test(t) &&
+     !/^(i|we|they|he|she|it)\s+think\b/i.test(t) && wordsOf(t).length>=8) return 4;
+  if(/\b(because|if|when|although|while|since|so that)\b/i.test(t)) return 3;
+  if(/\band\b|\bbut\b|\bor\b|\bso\b/i.test(t) && wordsOf(t).length>=5) return 2;
+  return 1;
+}
+function levelUpgradeTip(level, stage){
+  if(stage==="小学"){
+    return ["试着用 and / but 把两句连成一句（并列句），读起来更顺。",
+            "可以试试 because：I like ... because ...，说出原因。"];
+  }
+  if(stage==="中考"){
+    return ["试着用 because / when / if 把两句连成复合句。",
+            "试着用 who / which / that 加一个小从句描述前面的名词，如 The boy who is ... 。"];
+  }
+  return ["试着把一个简单句升级成含 because / although 的复合句。",
+          "试着用 which / that 定语从句，或分词短语（如 Having finished ...）让人眼前一亮。"];
+}
 function lineReview(text){
   const sentences = text.split(/(?<=[.!?])\s+/).filter(s=>s.trim());
   if(!sentences.length) return "";
+  const stage = (topicById(curTopic())||{}).stage || "小学";
   // 这些类型的句子本来就简短，不该建议加细节
   const shortOK = t =>
-    /^(my name is|hello\b|hi\b|good morning|good afternoon|goodbye|bye\b|thank you|thanks\b)/i.test(t) ||      // 问候/自我介绍
-    /^(i am|i'm)\s+\d+\s+years old/i.test(t) ||                                                                  // 年龄
-    /^(i am|i'm|i feel|i'm feeling)\s+(happy|sad|glad|excited|fine|ok|okay|great|good|tired|sorry|well)/i.test(t) || // 感受
-    /^(i love it|i like it|i love my|that's all|the end|it was fun|it is fun)/i.test(t);                          // 结尾句
-  return '<ul class="line-review">'+sentences.map((s,idx)=>{
+    /^(my name is|hello\b|hi\b|good morning|good afternoon|goodbye|bye\b|thank you|thanks\b)/i.test(t) ||
+    /^(i am|i'm)\s+\d+\s+years old/i.test(t) ||
+    /^(i am|i'm|i feel|i'm feeling)\s+(happy|sad|glad|excited|fine|ok|okay|great|good|tired|sorry|well)/i.test(t) ||
+    /^(i love it|i like it|i love my|that's all|the end|it was fun|it is fun)/i.test(t);
+  const lvName=["","简单句","并列句","复合句","定语从句"];
+  let html='<ul class="line-review">';
+  sentences.forEach(s=>{
     const t=s.trim();
     const wc=wordsOf(t).length;
+    const sl=sentenceLevel(t);
     let tips=[];
     if(/^[A-Z]/.test(t)) tips.push("开头大写 ✓"); else tips.push("首字母要大写");
     if(/[.!?]$/.test(t)) tips.push("有标点 ✓"); else tips.push("句末加标点");
-    // 真正的修饰细节（不含泛词 and）
     const hasDetail = /\b(because|in the|on the|at the|very|really|every day|on weekends|in the morning|in the afternoon|in the evening|with my|and it is)\b/i.test(t);
-    if(hasDetail){
-      tips.push("有细节，赞");
-    } else if(wc<5 && shortOK(t)){
-      tips.push("简洁清楚 ✓");
-    } else if(wc<5){
-      // 建议贴合这句的实际内容
+    if(hasDetail){ tips.push("有细节，赞"); }
+    else if(wc<5 && shortOK(t)){ tips.push("简洁清楚 ✓"); }
+    else if(wc<5){
       let tip="可以再加一点细节";
       if(/^(i like|i love|my favorite)\b/i.test(t)) tip="可以加 because 说说为什么喜欢";
       else if(/^(i|we)\s+(go|play|get up|have|eat|read|watch|run|study|visit)\b/i.test(t)) tip="可以加地点或时间";
@@ -2158,8 +2222,19 @@ function lineReview(text){
       tips.push(tip);
     }
     const good = tips.every(x=>x.includes("✓")||x.includes("赞"));
-    return `<li class="${good?'':'tip'}">${escAttr(t)} — ${tips.join("，")}</li>`;
-  }).join("")+'</ul>';
+    const lvTip = sl<3 ? levelUpgradeTip(sl,stage)[sl-1] : "句式不错，继续保持！";
+    const cls = good?'':(sl<3?'up':'tip');
+    html+=`<li class="${cls}">${escAttr(t)} <span class="lv-chip l${sl}">${lvName[sl]}</span> — ${tips.join("，")}${sl<3?'<br><span style="font-size:13px;color:#3a6fc4">💡 '+escAttr(lvTip)+'</span>':''}</li>`;
+  });
+  html+='</ul>';
+  // 句式总览
+  const counts=[0,0,0,0];
+  sentences.forEach(s=>{ counts[sentenceLevel(s.trim())-1]++; });
+  const topLevel=counts.reduce((a,c,i)=>c>counts[a]?i:a,0)+1;
+  const ladder="简单句 → 并列句 → 复合句 → 定语从句";
+  html+='<div class="sent-level"><b>📊 句式小档案</b>：这篇主要用<b>'+escAttr(lvName[topLevel])+'</b>（简单句 '+counts[0]+' · 并列 '+counts[1]+' · 复合 '+counts[2]+' · 定语从句 '+counts[3]+'）'
+    +'<div class="ladder">进阶路线：'+ladder+'<br>💡 '+escAttr(levelUpgradeTip(topLevel,stage)[topLevel<3?topLevel-1:1])+'</div></div>';
+  return html;
 }
 
 /* ---------- 庆祝：彩纸 + 音效 ---------- */
@@ -2410,22 +2485,25 @@ function renderReview(){
       const r=state.review[k], m=isMastered(k);
       return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #eee;font-size:14px">'
         +'<span>'+escAttr(reviewItemLabel(k))+'</span>'
-        +'<span class="rv-status">'+(m?"🏆 已掌握":"盒子 "+(r.box+1)+"/"+BOX_DAYS.length+" · "+(r.due<=todayKey()?"今天复习":r.due))+'</span></div>';
+        +'<span class="rv-status">'+(m?"🏆 已掌握":"熟练度 "+(r.s||1).toFixed(0)+" 天 · "+(r.due<=todayKey()?"今天复习":r.due))+'</span></div>';
     }).join("")+'</details>';
   }
   $("reviewBody").innerHTML=html;
-  // 绑定今天到期卡片的按钮
+  // 绑定今天到期卡片的按钮（FSRS 四档：忘了 / 吃力 / 顺利 / 太简单）
   keys.forEach(k=>{
-    const btnO=$("rvok_"+k), btnX=$("rvno_"+k);
-    if(!btnO) return;
-    btnO.onclick=()=>{
-      const input=$("rvinput_"+k);
-      if(input && !(input.value||"").trim()){
-        const a=$("rvans_"+k); if(a){a.className="rv-answer show";a.innerHTML="先自己写出来，再看答案对照哦。";} return;
-      }
-      reviewAnswer(k,true); renderReview();
-    };
-    btnX.onclick=()=>{ reviewAnswer(k,false); renderReview(); };
+    [0,1,2,3].forEach(g=>{
+      const b=$("rvg_"+k+"_"+g);
+      if(!b) return;
+      b.onclick=()=>{
+        if(g>0){
+          const input=$("rvinput_"+k);
+          if(input && !(input.value||"").trim()){
+            const a=$("rvans_"+k); if(a){a.className="rv-answer show";a.innerHTML="先自己写出来，再看答案对照哦。";} return;
+          }
+        }
+        reviewAnswer(k,g); renderReview();
+      };
+    });
   });
 }
 function reviewCard(key){
@@ -2433,15 +2511,20 @@ function reviewCard(key){
   const [kind,id]=key.split(":");
   const t=topicById(id);
   const m=isMastered(key);
-  const boxes=BOX_DAYS.map((_,i)=>'<span class="rv-box '+(i<=r.box?(m?"master":"on"):"")+'"></span>').join("");
-  const status='<span class="rv-status">'+(m?"🏆 自动化了":"第 "+(r.box+1)+" 级 · "+r.streak+"/2 连续对")+'</span>';
+  const bars=[1,3,7,15,30].map(v=>'<span class="rv-box '+((r.s||1)>=v?(m?"master":"on"):"")+'"></span>').join("");
+  const status='<span class="rv-status">'+(m?"🏆 自动化了":"熟练度 "+(r.s||1).toFixed(0)+" 天 · 连续对 "+(r.streak||0)+"/3")+'</span>';
+  const gradeBtns='<div class="rv-btns">'
+    +'<button class="rv-grade g0" id="rvg_'+key+'_0">😵 忘了</button>'
+    +'<button class="rv-grade g1" id="rvg_'+key+'_1">😕 吃力</button>'
+    +'<button class="rv-grade g2" id="rvg_'+key+'_2">🙂 顺利</button>'
+    +'<button class="rv-grade g3" id="rvg_'+key+'_3">😎 太简单</button></div>';
   if(kind==="T"){
     // 模板应用：给主题，让孩子把模板框架真正写成一段（套用到这个主题）
     const tp=templatePrompt(t);
     if(!tp) return "";
     const steps=tp.steps.map((s,i)=>(i+1)+". "+s).join(" / ");
     return '<div class="rv-item" id="rv_'+key+'">'
-      +'<div class="rv-head"><span class="rv-name">📐 '+escAttr(t.name)+' · 模板</span><span>'+boxes+' '+status+'</span></div>'
+      +'<div class="rv-head"><span class="rv-name">📐 '+escAttr(t.name)+' · 模板</span><span>'+bars+' '+status+'</span></div>'
       +'<div class="rv-status">模板「'+escAttr(tp.name)+'」结构：'+escAttr(tp.steps.join(" → "))+'</div>'
       +'<div class="rv-prompt" style="font-size:14px">用这个模板，写「'+escAttr(t.title)+'」的框架（每步写一句）：</div>'
       +'<textarea id="rvinput_'+key+'" placeholder="①… ②… ③… 照模板写出几句…" style="width:100%;min-height:80px;border:2px solid #d9c9ad;border-radius:10px;padding:8px;font-size:14px;font-family:inherit">'
@@ -2450,24 +2533,22 @@ function reviewCard(key){
       +'<div class="rv-btns">'
       +'<button class="ghost" id="rvshow_'+key+'">👀 看参考框架</button>'
       +'<button class="ghost" id="rvgo_'+key+'">✍️ 去用这个模板写作</button>'
-      +'<button class="rv-ok" id="rvok_'+key+'">✅ 套用成功</button>'
-      +'<button class="rv-no" id="rvno_'+key+'">❌ 还没掌握</button>'
-      +'</div></div>';
+      +'</div>'
+      +gradeBtns+'</div>';
   }
   // 句型提取
   const pr=patternPrompt(t);
   const sample=(t.pattern.samples||[t.pattern.sample])[Math.floor(Math.random()*Math.max(1,(t.pattern.samples||[t.pattern.sample]).length))];
   return '<div class="rv-item" id="rv_'+key+'">'
-    +'<div class="rv-head"><span class="rv-name">✏️ '+escAttr(t.name)+' · 句型</span><span>'+boxes+' '+status+'</span></div>'
+    +'<div class="rv-head"><span class="rv-name">✏️ '+escAttr(t.name)+' · 句型</span><span>'+bars+' '+status+'</span></div>'
     +'<div class="rv-prompt">句型：<b>'+escAttr(pr.skeleton)+'</b></div>'
     +'<div class="rv-status">想一想：'+escAttr(pr.cn)+'（先别看答案，自己写出来）</div>'
     +'<input id="rvinput_'+key+'" placeholder="在这里写出完整英文句子…">'
     +'<div class="rv-answer" id="rvans_'+key+'">参考答案：'+escAttr(sample)+'</div>'
     +'<div class="rv-btns">'
     +'<button class="ghost" id="rvshow_'+key+'">👀 看答案</button>'
-    +'<button class="rv-ok" id="rvok_'+key+'">✅ 写对了</button>'
-    +'<button class="rv-no" id="rvno_'+key+'">❌ 没记住</button>'
-    +'</div></div>';
+    +'</div>'
+    +gradeBtns+'</div>';
 }
 function toggleReview(show){
   const c=$("reviewCard");
@@ -2494,8 +2575,8 @@ let forceQueue=[], forceIdx=0, forceRetry={}, forceTotal=0;
 function startForceReview(){
   const due=dueReviewKeys();
   if(!due.length || state.reviewDone===todayKey()) return false;
-  // 优先盒子低的（最不熟的先练），最多 FORCE_LIMIT 条
-  forceQueue=due.sort((a,b)=>state.review[a].box-state.review[b].box).slice(0,FORCE_LIMIT);
+  // 优先熟练度低（最不熟）的先练，最多 FORCE_LIMIT 条
+  forceQueue=due.sort((a,b)=>(state.review[a].s||1)-(state.review[b].s||1)).slice(0,FORCE_LIMIT);
   forceIdx=0; forceRetry={}; forceTotal=forceQueue.length;
   $("forceMask").classList.add("show");
   document.body.classList.add("force-locked");
@@ -2536,27 +2617,28 @@ function renderForceStep(){
   const inEl=$("forceBody").querySelector("input,textarea");
   const showBtn=$("forceBody").querySelector("button[id^=rvshow_]");
   if(showBtn) showBtn.onclick=()=>{ const a=$("forceBody").querySelector(".rv-answer"); if(a) a.classList.add("show"); };
-  const okBtn=$("forceBody").querySelector("button[id^=rvok_]");
-  const noBtn=$("forceBody").querySelector("button[id^=rvno_]");
-  const advance=(ok)=>{
-    reviewAnswer(key,ok);
-    if(!ok && !forceRetry[key]){
-      // 答错：当天排到队尾再练一次
+  const advance=(grade)=>{
+    reviewAnswer(key,grade);
+    if(grade===0 && !forceRetry[key]){
+      // 忘了(0)：当天排到队尾再练一次
       forceRetry[key]=true;
       forceQueue.push(key);
     }
     forceIdx++;
     renderForceStep();
   };
-  if(okBtn) okBtn.onclick=()=>{
-    if(inEl && !(inEl.value||"").trim()){
-      const a=$("forceBody").querySelector(".rv-answer");
-      if(a){a.classList.add("show");a.innerHTML="先自己写出来，再看答案对照哦。";}
-      return;
-    }
-    advance(true);
-  };
-  if(noBtn) noBtn.onclick=()=>advance(false);
+  [0,1,2,3].forEach(g=>{
+    const b=$("forceBody").querySelector("button[id=rvg_"+key+"_"+g+"]");
+    if(!b) return;
+    b.onclick=()=>{
+      if(g>0 && inEl && !(inEl.value||"").trim()){
+        const a=$("forceBody").querySelector(".rv-answer");
+        if(a){a.classList.add("show");a.innerHTML="先自己写出来，再看答案对照哦。";}
+        return;
+      }
+      advance(g);
+    };
+  });
 }
 
 /* ---------- 句子合并训练（TWR：because / but / so） ---------- */
@@ -2682,11 +2764,14 @@ $("aiClear").onclick=()=>{
   $("aiKey").value=""; $("aiReport").className="ai-report";
   renderAiStatus();
 };
-async function aiGrade(text, topic, level){
+async function aiGrade(text, topic, level, stage){
   const key=aiKey();
   if(!key) return {ok:false, msg:"还没填 API Key。点顶部「🤖 AI 批改」填入即可。"};
-  const sys="你是一位耐心的英语作文老师，教中国学生。请用中文回答，语气温和鼓励。";
-  const user="请批改下面这篇学生英语作文（主题："+topic+"）。\n作文：\n"+text+"\n\n请用国际通用的「写作6+1特质」框架批改，严格按这五部分回答：\n1) 评分：满分100分，给出具体分数。\n2) 六维度点评（每个维度给一句简短评价）：\n   · 思想内容 Ideas：主题清楚吗？细节丰富吗？\n   · 组织结构 Organization：开头中间结尾有序吗？\n   · 语言表达 Voice：读出作者的语气/感情了吗？\n   · 用词 Word Choice：用词准确、生动吗？\n   · 句子流畅 Sentence Fluency：句子长短有变化、读起来顺吗？\n   · 书写规范 Conventions：大小写、标点、拼写、语法对吗？\n3) 语法拼写：列出错误并给出正确写法；没有就写“没有发现明显错误”。\n4) 改进建议：给出1-3条最值得改的具体建议（优先改内容再用CUPS改错误），最后用一句鼓励的话结尾。\n\n然后，另起一段，严格按这个格式给出修改稿（这是第5部分，必须放在最后）：\n【修改稿】\n把修改后的完整英文作文写在这里。要求：把你新增或修改过的每个地方，用 << 和 >> 包起来（例如：<<I am twelve years old.>>），没改的地方保持原样。只输出作文本身，不要解释。";
+  const stageNote = (stage==="高考")?"按高中标准要求，注意语体是否得体、句与句之间是否衔接自然。"
+    : (stage==="中考")?"按中考标准要求，注意内容是否切题、有没有具体例子。"
+    : "按小学标准要求，鼓励为主，句子通顺、能表达清楚就值得表扬。";
+  const sys="你是一位耐心的英语作文老师，教中国学生"+stageNote+"请用中文回答，语气温和鼓励，像面对面批改作业一样。";
+  const user="请批改下面这篇学生英语作文（主题："+topic+"）。\n作文：\n"+text+"\n\n请严格按这五部分回答，每条批注都要引用作文里的原句（让同学能找到是哪一句）：\n1) 评分：满分100分，给出具体分数，并说一句这个分数最主要是好在哪。\n2) 先说亮点：找出1-2处真实写得好的地方（要具体，不要空话）。\n3) 三维批改：只挑最值得改的2-3处，按三个角度各给一条：\n   · 【语法】大小写、时态、主谓一致、标点、拼写等明确错误——引用原句，说出问题是什么，再用一个追问引导同学自己改（例如「'She go'里，第三人称单数的动词要怎么变？」），不要直接给答案。\n   · 【用词】有没有很依赖 very/good/nice 这类简单词，或重复用同一个词——指出原词，给升级方向，并问同学「你觉得换成这个词感觉有什么不同？」\n   · 【逻辑】观点有没有理由支撑、句子之间衔接是否自然——引用原句追问「为什么？」或「能加个 because / however 连起来吗？」\n   注意：区分「明确错误」和「可以更好的表达」，后者用「可以考虑」的语气，不要都说成错。\n4) 最优先改的一处：只选1处最值得先改的，用一句话说清怎么改；最后用一句具体的话鼓励同学（不要空泛的「加油」）。\n\n然后，另起一段，严格按这个格式给出修改稿（这是第5部分，必须放在最后）：\n【修改稿】\n把修改后的完整英文作文写在这里。要求：把你新增或修改过的每个地方，用 << 和 >> 包起来（例如：<<I am twelve years old.>>），没改的地方保持原样。修改要贴近同学原本想表达的意思，不要改写成大人腔。只输出作文本身，不要解释。";
   const ctrl=new AbortController();
   const timer=setTimeout(()=>ctrl.abort(),30000);
   try{
@@ -2744,7 +2829,7 @@ function bindAiGrade(){
     const out=$("aiGradeOut");
     out.className="ai-report show"; out.textContent="🤖 AI 正在批改，请稍等…";
     const t=topicById(curTopic());
-    const res=await aiGrade(text,t.name,"作文");
+    const res=await aiGrade(text,t.name,"作文",t.stage);
     if(res.ok) renderAiResult(out, res.content);
     else out.textContent="⚠️ "+res.msg;
   };
