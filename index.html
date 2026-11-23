@@ -82,6 +82,23 @@
   .cal-cell small{font-size:11px; line-height:1}
   .cal-legend{font-size:12px; color:#6f6f80; text-align:center; margin-top:10px}
   .cal-tip{background:#e8f4ff; border-radius:10px; padding:8px; font-size:13px; color:#2b6ea8; text-align:center; margin-top:8px}
+  /* 压扁成一行的小统计 */
+  .cal-head.compact{display:flex; gap:6px; margin-bottom:10px}
+  .cal-head.compact .stat{display:flex; align-items:baseline; justify-content:center; gap:5px; padding:6px 4px; border-radius:10px}
+  .cal-head.compact .stat b{font-size:17px; display:inline}
+  .cal-head.compact .stat span{font-size:11px; white-space:nowrap}
+  /* 本周一行 */
+  .week-strip{display:grid; grid-template-columns:repeat(7,1fr); gap:5px}
+  .wcell{border:2px solid #f0e8d8; border-radius:10px; padding:6px 2px; text-align:center; background:#fffdf8; min-height:56px; display:flex; flex-direction:column; align-items:center; justify-content:center}
+  .wcell .wd{font-size:11px; color:#6f6f80}
+  .wcell .wn{font-size:16px; font-weight:700; line-height:1.25}
+  .wcell .wm{font-size:10px; line-height:1.1; color:#d48806; min-height:12px}
+  .wcell.done{background:#eaf9ef; border-color:#8fd6a8}
+  .wcell.today{border-color:var(--accent); box-shadow:0 0 0 2px #ffd9c7}
+  .wcell.future{opacity:.4}
+  .cal-expand{width:100%; margin-top:10px; background:#fff; border:2px solid var(--line); border-radius:10px; padding:8px; font-size:13px; font-weight:700; color:#a07a3a; cursor:pointer; font-family:inherit; min-height:44px}
+  .cal-expand:hover{border-color:var(--accent)}
+  .cal-full.hidden{display:none}
 
   .grow-head{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; flex-wrap:wrap}
   .grow-head button{background:#fff; border:2px solid #d9c9ad; border-radius:999px; padding:7px 14px; font-size:14px; font-weight:700; cursor:pointer; color:#a07a3a}
@@ -450,19 +467,19 @@
     </div>
 
     <div class="panel-body" id="panelCalendar">
-    <div class="cal-head">
-      <div class="stat"><b id="streakDays">0</b><span>连续天数</span></div>
-      <div class="stat"><b id="totalDays">0</b><span>累计天数</span></div>
-      <div class="stat"><b id="weekDays">0</b><span>本周打卡</span></div>
+    <div class="cal-head compact" id="calHeadCompact"></div>
+    <div class="week-strip" id="weekStrip"></div>
+    <button class="cal-expand" id="calExpand" aria-expanded="false">📅 展开整月日历 ▼</button>
+    <div class="cal-full hidden" id="calFull">
+      <div class="cal-nav">
+        <button id="calPrev">‹</button>
+        <b id="calTitle">2026年11月</b>
+        <button id="calNext">›</button>
+      </div>
+      <div class="cal-week"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+      <div class="cal-grid" id="calGrid"></div>
+      <div class="cal-legend" id="calLegend"></div>
     </div>
-    <div class="cal-nav">
-      <button id="calPrev">‹</button>
-      <b id="calTitle">2026年11月</b>
-      <button id="calNext">›</button>
-    </div>
-    <div class="cal-week"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
-    <div class="cal-grid" id="calGrid"></div>
-    <div class="cal-legend" id="calLegend"></div>
     </div>
 
     <div class="panel-body hidden" id="panelGrow">
@@ -1445,12 +1462,32 @@ function weekCount(){
 }
 function renderCalendar(){
   const now = new Date();
+  const today = todayKey();
+  // 压扁成一行的小统计
+  $("calHeadCompact").innerHTML =
+      '<div class="stat"><b>'+currentStreak()+'</b><span>连续天</span></div>'
+    + '<div class="stat"><b>'+Object.keys(state.daily||{}).length+'</b><span>累计天</span></div>'
+    + '<div class="stat"><b>'+weekCount()+'</b><span>本周</span></div>';
+  // 本周一行（周一→周日）
+  const dow=(now.getDay()+6)%7;               // 周一=0
+  const monday=addDays(today,-dow);
+  const wd=["一","二","三","四","五","六","日"];
+  let strip="";
+  for(let i=0;i<7;i++){
+    const key=addDays(monday,i);
+    const rec=state.daily[key];
+    const day=+key.split("-")[2];
+    const cls=["wcell"];
+    if(rec) cls.push("done");
+    if(key===today) cls.push("today");
+    if(key>today) cls.push("future");
+    const mark=rec?"⭐".repeat(Math.min(3,rec.stars||1)):"·";
+    strip+='<div class="'+cls.join(" ")+'" title="'+key+(rec?' · '+rec.stars+'星':'')+'"><span class="wd">'+wd[i]+'</span><span class="wn">'+day+'</span><span class="wm">'+mark+'</span></div>';
+  }
+  $("weekStrip").innerHTML=strip;
+  // 整月（折叠区，展开时才看）
   if(!calMonth) calMonth = {y:now.getFullYear(), m:now.getMonth()+1};
   const {y,m} = calMonth;
-  const today = todayKey();
-  $("streakDays").textContent = currentStreak();
-  $("totalDays").textContent = Object.keys(state.daily||{}).length;
-  $("weekDays").textContent = weekCount();
   $("calTitle").textContent = y+"年"+m+"月";
   $("calNext").disabled = (y===now.getFullYear() && m===now.getMonth()+1);
   const firstDow = (new Date(y,m-1,1).getDay()+6)%7;
@@ -1472,6 +1509,14 @@ function renderCalendar(){
     ? "✅ 完成练习 · 星星是当天获得的颗数 · 橙框是今天"
     : '<div class="cal-tip">今天还没练习，点上面的「📅 每日一练」开始吧</div>';
 }
+// 展开/收起整月
+document.getElementById("calExpand").onclick=()=>{
+  const full=document.getElementById("calFull"), btn=document.getElementById("calExpand");
+  const open=full.classList.contains("hidden");
+  full.classList.toggle("hidden", !open);
+  btn.setAttribute("aria-expanded", String(open));
+  btn.textContent=open?"📅 收起整月日历 ▲":"📅 展开整月日历 ▼";
+};
 document.getElementById("calPrev").onclick = ()=>{
   let {y,m}=calMonth; m--; if(m<1){m=12;y--;} calMonth={y,m}; renderCalendar();
 };
