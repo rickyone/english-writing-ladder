@@ -1,0 +1,35 @@
+{
+  "name": "英语作文闯关 · 慢慢进阶",
+  "short_name": "作文闯关",
+  "description": "一步一步写英语作文：构思、仿写、扩写、自查、闯关复习。",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#fef9f0",
+  "theme_color": "#ff8a5b",
+  "categories": ["education", "kids"],
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

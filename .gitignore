@@ -1,0 +1,7 @@
+# 敏感配置：含数据库密码，绝不进公开仓库
+SUPABASE设置指南.md
+
+# 本地/系统文件
+.DS_Store
+Thumbs.db
+*.log
